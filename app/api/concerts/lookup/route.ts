@@ -96,63 +96,6 @@ async function fetchTicketmaster(bandName: string, cityName: string): Promise<Fe
   }
 }
 
-// ── SeatGeek ──────────────────────────────────────────────────────────────────
-async function fetchSeatGeek(bandName: string, cityName: string): Promise<FetchResult> {
-  // SeatGeek slugifies artist names: lowercase, spaces → hyphens, strip punctuation
-  const slug = bandName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const cityParam = encodeURIComponent(cityName);
-
-  const url =
-    `https://api.seatgeek.com/2/events` +
-    `?performers.slug=${encodeURIComponent(slug)}` +
-    `&venue.city=${cityParam}` +
-    `&type=concert&per_page=10&sort=datetime_local.asc`;
-
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    const data = await res.json();
-
-    if (!res.ok) {
-      // SeatGeek requires a client_id — surface that clearly
-      const msg = data?.message ?? data?.error ?? `HTTP ${res.status}`;
-      console.error("[SG] error:", msg);
-      return { events: [], error: `SeatGeek: ${msg}` };
-    }
-
-    const sgevents: SGEvent[] = data?.events ?? [];
-    console.log(`[SG] "${bandName}" → ${sgevents.length} events`);
-
-    return {
-      events: sgevents.map((e) => {
-        const venue = e.venue;
-        const performer = e.performers?.find((p) => p.slug === slug) ?? e.performers?.[0];
-        const dt = e.datetime_local ? new Date(e.datetime_local) : null;
-        const date = dt ? e.datetime_local.slice(0, 10) : null;
-        const startTime = dt
-          ? `${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`
-          : null;
-        return {
-          externalId: `sg-${e.id}`,
-          source: "SeatGeek",
-          bandName: performer?.name ?? bandName,
-          date,
-          venue: venue?.name ?? null,
-          city: venue ? `${venue.city}${venue.state ? ", " + venue.state : ""}` : null,
-          startTime,
-          ticketUrl: e.url ?? null,
-          priceMin: e.stats?.lowest_price ?? null,
-          priceMax: e.stats?.highest_price ?? null,
-          imageUrl: performer?.image ?? null,
-        };
-      }),
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[SG] fetch error:", msg);
-    return { events: [], error: `SeatGeek: ${msg}` };
-  }
-}
-
 // ── Merge + deduplicate by date+venue ─────────────────────────────────────────
 function merge(a: ShowResult[], b: ShowResult[]): ShowResult[] {
   const seen = new Set<string>();
@@ -178,16 +121,11 @@ export async function POST(req: NextRequest) {
   const rawCity = bodyCity ?? user.city;
   const cityName = rawCity.split(",")[0].trim();
 
-  const [tm, sg] = await Promise.all([
-    fetchTicketmaster(bandName, cityName),
-    fetchSeatGeek(bandName, cityName),
-  ]);
-
-  const apiErrors = [tm.error, sg.error].filter(Boolean);
+  const tm = await fetchTicketmaster(bandName, cityName);
 
   return NextResponse.json({
-    events: merge(tm.events, sg.events),
-    apiErrors: apiErrors.length ? apiErrors : undefined,
+    events: tm.events,
+    apiErrors: tm.error ? [tm.error] : undefined,
   });
 }
 
@@ -200,9 +138,3 @@ interface TMEvent {
   _embedded?: { venues?: { name?: string; city?: { name?: string }; stateCode?: string }[] };
 }
 
-interface SGEvent {
-  id: number; url?: string; datetime_local: string;
-  performers?: { name: string; slug: string; image?: string }[];
-  venue?: { name?: string; city?: string; state?: string };
-  stats?: { lowest_price?: number; highest_price?: number };
-}
