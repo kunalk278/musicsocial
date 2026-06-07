@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id         String    @id @default(cuid())
+  email      String    @unique
+  password   String
+  name       String
+  city       String
+  shareToken String    @unique @default(cuid())
+  createdAt  DateTime  @default(now())
+  concerts   Concert[]
+  following  Follow[]  @relation("follower")
+  followers  Follow[]  @relation("followee")
+}
+
+model Concert {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bandName   String
+  date       String
+  venue      String?
+  city       String?
+  startTime  String?
+  ticketUrl  String?
+  priceMin   Float?
+  priceMax   Float?
+  imageUrl   String?
+  status     String   @default("INTERESTED")
+  externalId String?
+  createdAt  DateTime @default(now())
+}
+
+model Follow {
+  id         String   @id @default(cuid())
+  followerId String
+  followeeId String
+  follower   User     @relation("follower", fields: [followerId], references: [id], onDelete: Cascade)
+  followee   User     @relation("followee", fields: [followeeId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([followerId, followeeId])
+}
