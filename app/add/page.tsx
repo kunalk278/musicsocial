@@ -49,6 +49,7 @@ export default function AddPage() {
   const [results, setResults] = useState<ShowResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [apiErrors, setApiErrors] = useState<string[]>([]);
 
   // City state
   const [userCity, setUserCity] = useState("");
@@ -118,6 +119,7 @@ export default function AddPage() {
     if (searchDebounce.current) clearTimeout(searchDebounce.current);
     setResults([]);
     setSearched(false);
+    setApiErrors([]);
     if (bandName.trim().length < 2 || !searchCity) return;
     searchDebounce.current = setTimeout(async () => {
       setSearching(true);
@@ -129,6 +131,7 @@ export default function AddPage() {
         });
         const data = await res.json();
         setResults(data.events ?? []);
+        if (data.apiErrors?.length) setApiErrors(data.apiErrors);
       } finally {
         setSearching(false);
         setSearched(true);
@@ -293,6 +296,16 @@ export default function AddPage() {
                     </button>
                   </>
                 )}
+              </div>
+            )}
+
+            {/* API error banner — visible so we can diagnose key issues */}
+            {apiErrors.length > 0 && results.length === 0 && (
+              <div className="mb-4 bg-red-900/20 border border-red-500/30 rounded-xl px-4 py-3">
+                <p className="text-xs font-semibold text-red-400 mb-1">Search error</p>
+                {apiErrors.map((e, i) => (
+                  <p key={i} className="text-xs text-red-300/80">{e}</p>
+                ))}
               </div>
             )}
 
