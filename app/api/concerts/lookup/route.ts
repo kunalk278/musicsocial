@@ -18,10 +18,10 @@ interface ShowResult {
 
 interface FetchResult {
   events: ShowResult[];
-  error?: string;
+  error?: string; // only set when a key is configured but the call fails
 }
 
-// ── Ticketmaster ──────────────────────────────────────────────────────────────
+// ── Ticketmaster (also covers Live Nation — same company) ─────────────────────
 async function fetchTicketmaster(bandName: string, cityName: string): Promise<FetchResult> {
   const apiKey = process.env.TICKETMASTER_API_KEY;
   if (!apiKey) return { events: [], error: "TICKETMASTER_API_KEY not configured" };
@@ -43,7 +43,7 @@ async function fetchTicketmaster(bandName: string, cityName: string): Promise<Fe
     const data = await res.json();
 
     if (data?.fault) {
-      const msg = data.fault.faultstring ?? "Unknown Ticketmaster error";
+      const msg = data.fault.faultstring ?? "Unknown error";
       console.error("[TM] fault:", msg);
       return { events: [], error: `Ticketmaster: ${msg}` };
     }
@@ -52,42 +52,33 @@ async function fetchTicketmaster(bandName: string, cityName: string): Promise<Fe
       console.error("[TM] error:", msg);
       return { events: [], error: `Ticketmaster: ${msg}` };
     }
-    if (!res.ok) {
-      return { events: [], error: `Ticketmaster: HTTP ${res.status}` };
-    }
+    if (!res.ok) return { events: [], error: `Ticketmaster: HTTP ${res.status}` };
 
     const events: TMEvent[] = data?._embedded?.events ?? [];
     console.log(`[TM] "${bandName}" → ${events.length} events`);
 
-    const cityLower = cityName.toLowerCase();
-    events.sort((a, b) => {
-      const aCity = (a._embedded?.venues?.[0]?.city?.name ?? "").toLowerCase();
-      const bCity = (b._embedded?.venues?.[0]?.city?.name ?? "").toLowerCase();
-      const aMatch = aCity.includes(cityLower) ? 0 : 1;
-      const bMatch = bCity.includes(cityLower) ? 0 : 1;
-      if (aMatch !== bMatch) return aMatch - bMatch;
-      return (a.dates?.start?.localDate ?? "").localeCompare(b.dates?.start?.localDate ?? "");
-    });
-
     return {
-      events: events.slice(0, 10).map((e) => {
-        const venue = e._embedded?.venues?.[0];
-        const priceRange = e.priceRanges?.[0];
-        const image = e.images?.find((i) => i.ratio === "16_9" && i.width > 500) ?? e.images?.[0];
-        return {
-          externalId: `tm-${e.id}`,
-          source: "Ticketmaster",
-          bandName: e.name,
-          date: e.dates?.start?.localDate ?? null,
-          venue: venue?.name ?? null,
-          city: venue ? `${venue.city?.name}${venue.stateCode ? ", " + venue.stateCode : ""}` : null,
-          startTime: e.dates?.start?.localTime ? e.dates.start.localTime.slice(0, 5) : null,
-          ticketUrl: e.url ?? null,
-          priceMin: priceRange?.min ?? null,
-          priceMax: priceRange?.max ?? null,
-          imageUrl: image?.url ?? null,
-        };
-      }),
+      events: sortByCity(
+        events.slice(0, 15).map((e) => {
+          const venue = e._embedded?.venues?.[0];
+          const priceRange = e.priceRanges?.[0];
+          const image = e.images?.find((i) => i.ratio === "16_9" && i.width > 500) ?? e.images?.[0];
+          return {
+            externalId: `tm-${e.id}`,
+            source: "Ticketmaster",
+            bandName: e.name,
+            date: e.dates?.start?.localDate ?? null,
+            venue: venue?.name ?? null,
+            city: venue ? `${venue.city?.name}${venue.stateCode ? ", " + venue.stateCode : ""}` : null,
+            startTime: e.dates?.start?.localTime ? e.dates.start.localTime.slice(0, 5) : null,
+            ticketUrl: e.url ?? null,
+            priceMin: priceRange?.min ?? null,
+            priceMax: priceRange?.max ?? null,
+            imageUrl: image?.url ?? null,
+          };
+        }),
+        cityName,
+      ),
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -96,12 +87,138 @@ async function fetchTicketmaster(bandName: string, cityName: string): Promise<Fe
   }
 }
 
-// ── Merge + deduplicate by date+venue ─────────────────────────────────────────
-function merge(a: ShowResult[], b: ShowResult[]): ShowResult[] {
+// ── SeatGeek ──────────────────────────────────────────────────────────────────
+// Free client_id: https://seatgeek.com/account/develop
+async function fetchSeatGeek(bandName: string, cityName: string): Promise<FetchResult> {
+  const clientId = process.env.SEATGEEK_CLIENT_ID;
+  if (!clientId) return { events: [] }; // silently skip — not required
+
+  const url =
+    `https://api.seatgeek.com/2/events` +
+    `?q=${encodeURIComponent(bandName)}` +
+    `&venue.city=${encodeURIComponent(cityName)}` +
+    `&type=concert&per_page=15&sort=datetime_local.asc` +
+    `&client_id=${clientId}`;
+
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) {
+      const msg = data?.message ?? `HTTP ${res.status}`;
+      console.error("[SG] error:", msg);
+      return { events: [], error: `SeatGeek: ${msg}` };
+    }
+
+    const events: SGEvent[] = data?.events ?? [];
+    console.log(`[SG] "${bandName}" → ${events.length} events`);
+
+    return {
+      events: events.map((e) => {
+        const performer = e.performers?.[0];
+        const dt = e.datetime_local ? new Date(e.datetime_local) : null;
+        return {
+          externalId: `sg-${e.id}`,
+          source: "SeatGeek",
+          bandName: performer?.name ?? bandName,
+          date: e.datetime_local ? e.datetime_local.slice(0, 10) : null,
+          venue: e.venue?.name ?? null,
+          city: e.venue ? `${e.venue.city}${e.venue.state ? ", " + e.venue.state : ""}` : null,
+          startTime: dt
+            ? `${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`
+            : null,
+          ticketUrl: e.url ?? null,
+          priceMin: e.stats?.lowest_price ?? null,
+          priceMax: e.stats?.highest_price ?? null,
+          imageUrl: performer?.image ?? null,
+        };
+      }),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[SG] fetch error:", msg);
+    return { events: [], error: `SeatGeek: ${msg}` };
+  }
+}
+
+// ── Eventbrite ────────────────────────────────────────────────────────────────
+// Free private token: https://www.eventbrite.com/platform/api-keys
+async function fetchEventbrite(bandName: string, cityName: string): Promise<FetchResult> {
+  const token = process.env.EVENTBRITE_TOKEN;
+  if (!token) return { events: [] }; // silently skip — not required
+
+  const now = new Date().toISOString();
+  const url =
+    `https://www.eventbriteapi.com/v3/events/search/` +
+    `?q=${encodeURIComponent(bandName)}` +
+    `&location.address=${encodeURIComponent(cityName)}` +
+    `&location.within=30mi` +
+    `&categories=103` + // music
+    `&start_date.range_start=${now}` +
+    `&sort_by=date` +
+    `&expand=venue,ticket_availability` +
+    `&page_size=15`;
+
+  try {
+    const res = await fetch(url, {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const msg = data?.error_description ?? data?.error ?? `HTTP ${res.status}`;
+      console.error("[EB] error:", msg);
+      return { events: [], error: `Eventbrite: ${msg}` };
+    }
+
+    const events: EBEvent[] = data?.events ?? [];
+    console.log(`[EB] "${bandName}" → ${events.length} events`);
+
+    return {
+      events: events.map((e) => {
+        const localStart = e.start?.local ?? null;
+        const dt = localStart ? new Date(localStart) : null;
+        return {
+          externalId: `eb-${e.id}`,
+          source: "Eventbrite",
+          bandName: e.name?.text ?? bandName,
+          date: localStart ? localStart.slice(0, 10) : null,
+          venue: e.venue?.name ?? null,
+          city: e.venue?.address
+            ? `${e.venue.address.city ?? ""}${e.venue.address.region ? ", " + e.venue.address.region : ""}`
+            : null,
+          startTime: dt
+            ? `${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`
+            : null,
+          ticketUrl: e.url ?? null,
+          priceMin: e.ticket_availability?.minimum_ticket_price?.value ?? null,
+          priceMax: e.ticket_availability?.maximum_ticket_price?.value ?? null,
+          imageUrl: e.logo?.url ?? null,
+        };
+      }),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[EB] fetch error:", msg);
+    return { events: [], error: `Eventbrite: ${msg}` };
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function sortByCity(events: ShowResult[], cityName: string): ShowResult[] {
+  const cityLower = cityName.toLowerCase();
+  return [...events].sort((a, b) => {
+    const aMatch = (a.city ?? "").toLowerCase().includes(cityLower) ? 0 : 1;
+    const bMatch = (b.city ?? "").toLowerCase().includes(cityLower) ? 0 : 1;
+    if (aMatch !== bMatch) return aMatch - bMatch;
+    return (a.date ?? "").localeCompare(b.date ?? "");
+  });
+}
+
+function mergeAll(sources: ShowResult[][]): ShowResult[] {
   const seen = new Set<string>();
   const result: ShowResult[] = [];
-  for (const show of [...a, ...b]) {
-    const key = `${show.date ?? ""}|${(show.venue ?? "").toLowerCase().slice(0, 20)}`;
+  for (const show of sources.flat()) {
+    const key = `${show.date ?? ""}|${(show.venue ?? "").toLowerCase().replace(/\s+/g, "").slice(0, 20)}`;
     if (!seen.has(key)) { seen.add(key); result.push(show); }
   }
   return result.sort((x, y) => (x.date ?? "").localeCompare(y.date ?? ""));
@@ -121,11 +238,18 @@ export async function POST(req: NextRequest) {
   const rawCity = bodyCity ?? user.city;
   const cityName = rawCity.split(",")[0].trim();
 
-  const tm = await fetchTicketmaster(bandName, cityName);
+  const [tm, sg, eb] = await Promise.all([
+    fetchTicketmaster(bandName, cityName),
+    fetchSeatGeek(bandName, cityName),
+    fetchEventbrite(bandName, cityName),
+  ]);
+
+  // Only surface errors for sources that are configured but failing
+  const apiErrors = [tm.error, sg.error, eb.error].filter(Boolean);
 
   return NextResponse.json({
-    events: tm.events,
-    apiErrors: tm.error ? [tm.error] : undefined,
+    events: mergeAll([tm.events, sg.events, eb.events]),
+    apiErrors: apiErrors.length ? apiErrors : undefined,
   });
 }
 
@@ -138,3 +262,21 @@ interface TMEvent {
   _embedded?: { venues?: { name?: string; city?: { name?: string }; stateCode?: string }[] };
 }
 
+interface SGEvent {
+  id: number; url?: string; datetime_local: string;
+  performers?: { name: string; slug: string; image?: string }[];
+  venue?: { name?: string; city?: string; state?: string };
+  stats?: { lowest_price?: number; highest_price?: number };
+}
+
+interface EBEvent {
+  id: string; url?: string;
+  name?: { text?: string };
+  start?: { local?: string };
+  logo?: { url?: string };
+  venue?: { name?: string; address?: { city?: string; region?: string } };
+  ticket_availability?: {
+    minimum_ticket_price?: { value?: number };
+    maximum_ticket_price?: { value?: number };
+  };
+}
