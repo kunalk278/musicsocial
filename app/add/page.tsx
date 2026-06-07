@@ -63,6 +63,9 @@ export default function AddPage() {
   const [manualVenue, setManualVenue] = useState("");
   const [manualCity, setManualCity] = useState("");
 
+  // Show more toggle for out-of-city results
+  const [showOtherCities, setShowOtherCities] = useState(false);
+
   // Confirm step state
   const [selected, setSelected] = useState<ShowResult | null>(null);
   const [concertStatus, setConcertStatus] = useState("INTERESTED");
@@ -121,6 +124,7 @@ export default function AddPage() {
     setResults([]);
     setSearched(false);
     setApiErrors([]);
+    setShowOtherCities(false);
     if (bandName.trim().length < 2 || !searchCity) return;
     searchDebounce.current = setTimeout(async () => {
       setSearching(true);
@@ -266,7 +270,8 @@ export default function AddPage() {
                         onChange={setCityDraft}
                         autoFocus
                         onBlur={commitCity}
-                        onKeyDown={(e) => { if (e.key === "Enter") commitCity(); if (e.key === "Escape") { setCityDraft(searchCity); setEditingCity(false); } }}
+                        onCommit={commitCity}
+                        onEscape={() => { setCityDraft(searchCity); setEditingCity(false); }}
                         inputClassName="w-full bg-white/5 border border-purple-500/60 rounded-lg px-2 py-0.5 text-white text-xs focus:outline-none"
                       />
                     </div>
@@ -311,12 +316,13 @@ export default function AddPage() {
             )}
 
             {/* Show results */}
-            {results.length > 0 && (
-              <div className="space-y-3">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
-                  Upcoming shows
-                </p>
-                {results.map((show) => (
+            {results.length > 0 && (() => {
+              const cityLower = searchCity.split(",")[0].toLowerCase();
+              const cityShows = results.filter((r) => r.city?.toLowerCase().includes(cityLower));
+              const otherShows = results.filter((r) => !r.city?.toLowerCase().includes(cityLower));
+
+              function ShowCard({ show }: { show: ShowResult }) {
+                return (
                   <button
                     key={show.externalId}
                     onClick={() => pickShow(show)}
@@ -327,14 +333,7 @@ export default function AddPage() {
                         <img src={show.imageUrl} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" />
                       )}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-semibold text-white">{show.bandName}</p>
-                          {show.source && (
-                            <span className="text-xs text-gray-600 border border-white/10 rounded px-1.5 py-0.5">
-                              {show.source}
-                            </span>
-                          )}
-                        </div>
+                        <p className="font-semibold text-white">{show.bandName}</p>
                         <p className="text-sm text-gray-400 mt-0.5 truncate">
                           {show.venue ?? "Venue TBD"}{show.city ? ` · ${show.city}` : ""}
                         </p>
@@ -347,9 +346,38 @@ export default function AddPage() {
                       <span className="text-gray-600 group-hover:text-purple-400 transition-colors text-lg shrink-0">→</span>
                     </div>
                   </button>
-                ))}
-              </div>
-            )}
+                );
+              }
+
+              return (
+                <div className="space-y-3">
+                  {cityShows.length > 0 && (
+                    <>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
+                        Upcoming shows in {searchCity.split(",")[0]}
+                      </p>
+                      {cityShows.map((show) => <ShowCard key={show.externalId} show={show} />)}
+                    </>
+                  )}
+
+                  {otherShows.length > 0 && (
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowOtherCities((v) => !v)}
+                        className="text-xs text-gray-500 hover:text-gray-300 transition-colors flex items-center gap-1 mb-3"
+                      >
+                        <span>{showOtherCities ? "▾" : "▸"}</span>
+                        {showOtherCities ? "Hide" : `See ${otherShows.length} show${otherShows.length !== 1 ? "s" : ""} in other cities`}
+                      </button>
+                      {showOtherCities && otherShows.map((show) => <ShowCard key={show.externalId} show={show} />)}
+                    </div>
+                  )}
+
+                  {cityShows.length === 0 && otherShows.length === 0 && null}
+                </div>
+              );
+            })()}
 
             {/* Manual form — appears immediately when no results found */}
             {noResults && (

@@ -41,34 +41,40 @@ const US_METROS = [
 interface Props {
   value: string;
   onChange: (v: string) => void;
+  onCommit?: () => void; // called when user confirms selection (Enter with no dropdown item, or Escape)
+  onEscape?: () => void;
   placeholder?: string;
   required?: boolean;
   autoFocus?: boolean;
   inputClassName?: string;
   onBlur?: () => void;
-  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
 }
 
 export default function CityAutocomplete({
   value,
   onChange,
+  onCommit,
+  onEscape,
   placeholder = "e.g. Chicago, IL",
   required,
   autoFocus,
   inputClassName,
   onBlur,
-  onKeyDown,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
 
-  // Keep query in sync if parent resets value externally
   useEffect(() => { setQuery(value); }, [value]);
 
   const filtered = query.length < 1
     ? []
     : US_METROS.filter((m) => m.toLowerCase().includes(query.toLowerCase())).slice(0, 8);
+
+  // Reset highlight when list changes
+  useEffect(() => { setHighlightedIndex(-1); }, [filtered.length]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -80,10 +86,46 @@ export default function CityAutocomplete({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightedIndex >= 0 && listRef.current) {
+      const item = listRef.current.children[highlightedIndex] as HTMLElement;
+      item?.scrollIntoView({ block: "nearest" });
+    }
+  }, [highlightedIndex]);
+
   function select(metro: string) {
     setQuery(metro);
     onChange(metro);
     setOpen(false);
+    setHighlightedIndex(-1);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!open || filtered.length === 0) {
+      if (e.key === "Enter") { e.preventDefault(); onCommit?.(); }
+      if (e.key === "Escape") { onEscape?.(); }
+      return;
+    }
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightedIndex((i) => Math.min(i + 1, filtered.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightedIndex((i) => Math.max(i - 1, -1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (highlightedIndex >= 0) {
+        select(filtered[highlightedIndex]);
+      } else {
+        onCommit?.();
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false);
+      setHighlightedIndex(-1);
+      onEscape?.();
+    }
   }
 
   return (
@@ -91,10 +133,15 @@ export default function CityAutocomplete({
       <input
         type="text"
         value={query}
-        onChange={(e) => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); }}
-        onFocus={() => filtered.length > 0 && setOpen(true)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          onChange(e.target.value);
+          setOpen(true);
+          setHighlightedIndex(-1);
+        }}
+        onFocus={() => { if (filtered.length > 0) setOpen(true); }}
         onBlur={onBlur}
-        onKeyDown={onKeyDown}
+        onKeyDown={handleKeyDown}
         required={required}
         autoFocus={autoFocus}
         autoComplete="off"
@@ -102,13 +149,18 @@ export default function CityAutocomplete({
         className={inputClassName ?? "w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-purple-500"}
       />
       {open && filtered.length > 0 && (
-        <ul className="absolute z-50 mt-1 w-full bg-[#14141f] border border-white/10 rounded-lg overflow-hidden shadow-xl">
-          {filtered.map((metro) => (
+        <ul ref={listRef} className="absolute z-50 mt-1 w-full bg-[#14141f] border border-white/10 rounded-lg overflow-hidden shadow-xl">
+          {filtered.map((metro, i) => (
             <li key={metro}>
               <button
                 type="button"
                 onMouseDown={() => select(metro)}
-                className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-purple-600/30 transition-colors"
+                onMouseEnter={() => setHighlightedIndex(i)}
+                className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                  i === highlightedIndex
+                    ? "bg-purple-600/40 text-white"
+                    : "text-gray-200 hover:bg-purple-600/20"
+                }`}
               >
                 {metro}
               </button>
