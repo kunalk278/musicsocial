@@ -4,6 +4,12 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Nav from "@/components/Nav";
 
+interface Artist {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+}
+
 interface ShowResult {
   externalId: string;
   bandName: string;
@@ -36,6 +42,8 @@ export default function AddPage() {
   const router = useRouter();
 
   const [bandName, setBandName] = useState("");
+  const [suggestions, setSuggestions] = useState<Artist[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [results, setResults] = useState<ShowResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -44,23 +52,52 @@ export default function AddPage() {
   const [step, setStep] = useState<Step>("search");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const suggestDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/signin");
   }, [status, router]);
 
+  // Close suggestions on outside click
   useEffect(() => {
-    if (bandName.trim().length < 2) {
-      setResults([]);
-      setSearched(false);
-      return;
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
     }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(async () => {
+  // Artist autocomplete (fast, 300ms)
+  useEffect(() => {
+    if (suggestDebounce.current) clearTimeout(suggestDebounce.current);
+    if (bandName.trim().length < 2) { setSuggestions([]); return; }
+
+    suggestDebounce.current = setTimeout(async () => {
+      const res = await fetch(`/api/concerts/suggest?q=${encodeURIComponent(bandName.trim())}`);
+      const data = await res.json();
+      setSuggestions(data.attractions ?? []);
+      setShowSuggestions(true);
+    }, 300);
+
+    return () => { if (suggestDebounce.current) clearTimeout(suggestDebounce.current); };
+  }, [bandName]);
+
+  // Show search (slower, 800ms — fires on band name change)
+  useEffect(() => {
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    setResults([]);
+    setSearched(false);
+
+    if (bandName.trim().length < 2) return;
+
+    searchDebounce.current = setTimeout(async () => {
       setSearching(true);
-      setSearched(false);
       try {
         const res = await fetch("/api/concerts/lookup", {
           method: "POST",
@@ -73,15 +110,20 @@ export default function AddPage() {
         setSearching(false);
         setSearched(true);
       }
-    }, 700);
+    }, 800);
 
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
+    return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); };
   }, [bandName]);
 
   if (status === "loading") return null;
   if (status !== "authenticated") return null;
+
+  function pickArtist(name: string) {
+    setBandName(name);
+    setSuggestions([]);
+    setShowSuggestions(false);
+    inputRef.current?.focus();
+  }
 
   function pickShow(show: ShowResult) {
     setSelected(show);
@@ -125,15 +167,19 @@ export default function AddPage() {
           <>
             <h1 className="text-2xl font-bold text-white mb-2">Add a show</h1>
             <p className="text-gray-500 text-sm mb-6">
-              Type a band or artist — we&apos;ll find upcoming shows in your city.
+              Type an artist — we&apos;ll find upcoming shows in your city.
             </p>
 
-            <div className="relative mb-6">
+            {/* Band input with artist autocomplete */}
+            <div ref={containerRef} className="relative mb-6">
               <input
+                ref={inputRef}
                 type="text"
                 autoFocus
+                autoComplete="off"
                 value={bandName}
-                onChange={(e) => setBandName(e.target.value)}
+                onChange={(e) => { setBandName(e.target.value); setShowSuggestions(true); }}
+                onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
                 placeholder="Band or artist name…"
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-lg placeholder-gray-600 focus:outline-none focus:border-purple-500 pr-10"
               />
@@ -142,9 +188,32 @@ export default function AddPage() {
                   <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
                 </div>
               )}
+
+              {/* Artist suggestions dropdown */}
+              {showSuggestions && suggestions.length > 0 && (
+                <ul className="absolute z-50 mt-1 w-full bg-[#14141f] border border-white/10 rounded-xl overflow-hidden shadow-2xl">
+                  {suggestions.map((a) => (
+                    <li key={a.id}>
+                      <button
+                        type="button"
+                        onMouseDown={() => pickArtist(a.name)}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-purple-600/20 transition-colors text-left"
+                      >
+                        {a.imageUrl ? (
+                          <img src={a.imageUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-white/10 shrink-0 flex items-center justify-center text-xs text-gray-500">🎵</div>
+                        )}
+                        <span className="text-sm text-white">{a.name}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
-            {searched && results.length === 0 && bandName.trim().length >= 2 && (
+            {/* Show results */}
+            {searched && results.length === 0 && bandName.trim().length >= 2 && !searching && (
               <div className="text-center py-10">
                 <p className="text-gray-400 mb-1">No upcoming shows found in your city.</p>
                 <p className="text-gray-600 text-sm">
@@ -173,11 +242,7 @@ export default function AddPage() {
                   >
                     <div className="flex items-center gap-4">
                       {show.imageUrl && (
-                        <img
-                          src={show.imageUrl}
-                          alt=""
-                          className="w-14 h-14 rounded-lg object-cover shrink-0"
-                        />
+                        <img src={show.imageUrl} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" />
                       )}
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-white">{show.bandName}</p>
@@ -191,9 +256,7 @@ export default function AddPage() {
                           {show.priceMin ? ` · from $${show.priceMin}` : ""}
                         </p>
                       </div>
-                      <span className="text-gray-600 group-hover:text-purple-400 transition-colors text-lg shrink-0">
-                        →
-                      </span>
+                      <span className="text-gray-600 group-hover:text-purple-400 transition-colors text-lg shrink-0">→</span>
                     </div>
                   </button>
                 ))}
@@ -213,14 +276,9 @@ export default function AddPage() {
 
             <h1 className="text-2xl font-bold text-white mb-6">Confirm show</h1>
 
-            {/* Show summary card */}
             <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden mb-6">
               {selected.imageUrl && (
-                <img
-                  src={selected.imageUrl}
-                  alt={selected.bandName}
-                  className="w-full h-36 object-cover opacity-80"
-                />
+                <img src={selected.imageUrl} alt={selected.bandName} className="w-full h-36 object-cover opacity-80" />
               )}
               <div className="p-4 space-y-1.5">
                 <p className="font-bold text-white text-lg">{selected.bandName}</p>
@@ -236,24 +294,17 @@ export default function AddPage() {
                   </p>
                 )}
                 {(selected.priceMin || selected.priceMax) && (
-                  <p className="text-sm text-gray-400">
-                    🎟️ from ${selected.priceMin ?? selected.priceMax}
-                  </p>
+                  <p className="text-sm text-gray-400">🎟️ from ${selected.priceMin ?? selected.priceMax}</p>
                 )}
                 {selected.ticketUrl && (
-                  <a
-                    href={selected.ticketUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block text-xs text-purple-400 hover:text-purple-300 mt-1"
-                  >
+                  <a href={selected.ticketUrl} target="_blank" rel="noopener noreferrer"
+                    className="inline-block text-xs text-purple-400 hover:text-purple-300 mt-1">
                     View tickets →
                   </a>
                 )}
               </div>
             </div>
 
-            {/* Status */}
             <div className="mb-6">
               <p className="text-sm text-gray-400 mb-3">Are you going?</p>
               <div className="flex gap-3">
@@ -261,16 +312,12 @@ export default function AddPage() {
                   { value: "ATTENDING", label: "🎟️ I have tickets" },
                   { value: "INTERESTED", label: "👀 I'm interested" },
                 ].map(({ value, label }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setConcertStatus(value)}
+                  <button key={value} type="button" onClick={() => setConcertStatus(value)}
                     className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-medium border transition-all ${
                       concertStatus === value
                         ? "bg-purple-600 border-purple-500 text-white"
                         : "border-white/10 text-gray-400 hover:border-white/30"
-                    }`}
-                  >
+                    }`}>
                     {label}
                   </button>
                 ))}
@@ -279,11 +326,8 @@ export default function AddPage() {
 
             {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
 
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white font-semibold py-3 rounded-xl transition-colors"
-            >
+            <button onClick={handleSave} disabled={saving}
+              className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white font-semibold py-3 rounded-xl transition-colors">
               {saving ? "Saving…" : "Add to my shows"}
             </button>
           </>

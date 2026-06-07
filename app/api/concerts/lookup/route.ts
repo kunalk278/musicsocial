@@ -17,7 +17,9 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const apiKey = process.env.TICKETMASTER_API_KEY;
-  const city = encodeURIComponent(user.city);
+  // Strip state abbreviation — Ticketmaster city param wants "New York" not "New York, NY"
+  const cityName = user.city.split(",")[0].trim();
+  const city = encodeURIComponent(cityName);
   const keyword = encodeURIComponent(bandName);
 
   const now = new Date();
