@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Nav from "@/components/Nav";
+import CityAutocomplete from "@/components/CityAutocomplete";
 
 interface Artist {
   id: string;
@@ -73,13 +74,12 @@ export default function AddPage() {
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const cityInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/signin");
   }, [status, router]);
 
-  // Load user's city
+  // Load user's city and pre-fill manual entry city
   useEffect(() => {
     if (status !== "authenticated") return;
     fetch("/api/me").then((r) => r.json()).then((u) => {
@@ -87,6 +87,7 @@ export default function AddPage() {
         setUserCity(u.city);
         setSearchCity(u.city);
         setCityDraft(u.city);
+        setManualCity(u.city);
       }
     });
   }, [status]);
@@ -258,17 +259,17 @@ export default function AddPage() {
               <div className="flex items-center gap-2 mb-6 min-h-[28px]">
                 {editingCity ? (
                   <>
-                    <span className="text-xs text-gray-500">Searching near</span>
-                    <input
-                      ref={cityInputRef}
-                      autoFocus
-                      type="text"
-                      value={cityDraft}
-                      onChange={(e) => setCityDraft(e.target.value)}
-                      onBlur={commitCity}
-                      onKeyDown={(e) => { if (e.key === "Enter") commitCity(); if (e.key === "Escape") { setCityDraft(searchCity); setEditingCity(false); } }}
-                      className="bg-white/5 border border-purple-500/60 rounded-lg px-2 py-0.5 text-white text-xs focus:outline-none w-44"
-                    />
+                    <span className="text-xs text-gray-500 shrink-0">Searching near</span>
+                    <div className="w-52">
+                      <CityAutocomplete
+                        value={cityDraft}
+                        onChange={setCityDraft}
+                        autoFocus
+                        onBlur={commitCity}
+                        onKeyDown={(e) => { if (e.key === "Enter") commitCity(); if (e.key === "Escape") { setCityDraft(searchCity); setEditingCity(false); } }}
+                        inputClassName="w-full bg-white/5 border border-purple-500/60 rounded-lg px-2 py-0.5 text-white text-xs focus:outline-none"
+                      />
+                    </div>
                   </>
                 ) : (
                   <>
@@ -392,12 +393,11 @@ export default function AddPage() {
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1.5">City <span className="text-gray-600">(optional)</span></label>
-                      <input
-                        type="text"
+                      <CityAutocomplete
                         value={manualCity}
-                        onChange={(e) => setManualCity(e.target.value)}
+                        onChange={setManualCity}
                         placeholder="e.g. New York, NY"
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-700 focus:outline-none focus:border-purple-500"
+                        inputClassName="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-700 focus:outline-none focus:border-purple-500"
                       />
                     </div>
                   </div>
