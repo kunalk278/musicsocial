@@ -10,9 +10,9 @@ datasource db {
 model User {
   id         String    @id @default(cuid())
   email      String    @unique
-  password   String
+  password   String?
   name       String
-  city       String
+  city       String    @default("")
   shareToken String    @unique @default(cuid())
   createdAt  DateTime  @default(now())
   concerts   Concert[]

@@ -203,6 +203,138 @@ async function fetchEventbrite(bandName: string, cityName: string): Promise<Fetc
   }
 }
 
+// ── Resident Advisor (unofficial GraphQL — covers indie/electronic venues) ─────
+// No key required. Covers venues like Elsewhere, Nowadays, Pacha, Output, etc.
+const RA_AREA_IDS: Record<string, number> = {
+  "new york": 13, "los angeles": 9, "chicago": 24, "san francisco": 25,
+  "miami": 67, "seattle": 71, "austin": 73, "washington": 52, "boston": 26,
+  "atlanta": 68, "denver": 74, "portland": 75, "nashville": 76,
+  "philadelphia": 77, "dallas": 78, "houston": 79, "las vegas": 80,
+  "minneapolis": 81, "detroit": 82, "new orleans": 83, "phoenix": 84,
+};
+
+const RA_QUERY = `
+  query GetEventListings($filters: FilterInputDtoInput, $pageSize: Int) {
+    eventListings(
+      filters: $filters
+      pageSize: $pageSize
+      page: 1
+      sort: { listingDate: { priority: 1, order: ASC } }
+    ) {
+      data {
+        id
+        event {
+          id
+          title
+          date
+          startTime
+          contentUrl
+          images { filename type }
+          venue {
+            id
+            name
+            address
+            city { name }
+          }
+          artists { id name }
+          tickets { price url isAvailable }
+        }
+      }
+      totalResults
+    }
+  }
+`;
+
+async function fetchResidentAdvisor(bandName: string, cityName: string): Promise<FetchResult> {
+  const now = new Date();
+  const oneYear = new Date();
+  oneYear.setFullYear(oneYear.getFullYear() + 1);
+
+  const areaId = RA_AREA_IDS[cityName.toLowerCase()];
+
+  const filters: Record<string, unknown> = {
+    listingDate: {
+      gte: now.toISOString().split("T")[0],
+      lte: oneYear.toISOString().split("T")[0],
+    },
+    event: { title: { ilike: `%${bandName}%` } },
+  };
+  if (areaId) filters.areas = { eq: areaId };
+
+  try {
+    const res = await fetch("https://ra.co/graphql", {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        "Referer": "https://ra.co/",
+        "User-Agent": "Mozilla/5.0 (compatible; showshare/1.0)",
+        "ra-content-language": "en",
+      },
+      body: JSON.stringify({
+        operationName: "GetEventListings",
+        query: RA_QUERY,
+        variables: { filters, pageSize: 15 },
+      }),
+    });
+
+    if (!res.ok) {
+      console.error(`[RA] HTTP ${res.status}`);
+      return { events: [], error: `Resident Advisor: HTTP ${res.status}` };
+    }
+
+    const json = await res.json();
+    if (json.errors?.length) {
+      const msg = json.errors[0]?.message ?? "GraphQL error";
+      console.error("[RA] GraphQL error:", msg);
+      return { events: [], error: `Resident Advisor: ${msg}` };
+    }
+
+    const listings: RAListing[] = json.data?.eventListings?.data ?? [];
+    console.log(`[RA] "${bandName}" → ${listings.length} events`);
+
+    return {
+      events: listings
+        .filter((l) => l.event)
+        .map((l) => {
+          const e = l.event!;
+          const ticket = e.tickets?.find((t) => t.isAvailable) ?? e.tickets?.[0];
+          const image = e.images?.find((i) => i.type === "flyer") ?? e.images?.[0];
+          const imageUrl = image?.filename
+            ? (image.filename.startsWith("http") ? image.filename : `https://ra.co/images/${image.filename}`)
+            : null;
+
+          // startTime from RA is a full ISO datetime; extract HH:MM
+          let startTime: string | null = null;
+          if (e.startTime) {
+            const t = new Date(e.startTime);
+            if (!isNaN(t.getTime())) {
+              startTime = `${t.getHours().toString().padStart(2, "0")}:${t.getMinutes().toString().padStart(2, "0")}`;
+            }
+          }
+
+          return {
+            externalId: `ra-${l.id}`,
+            source: "Resident Advisor",
+            bandName: e.title ?? bandName,
+            date: e.date ?? null,
+            venue: e.venue?.name ?? null,
+            city: e.venue?.city?.name ?? null,
+            startTime,
+            ticketUrl: ticket?.url ?? (e.contentUrl ? `https://ra.co${e.contentUrl}` : null),
+            priceMin: ticket?.price ?? null,
+            priceMax: null,
+            imageUrl,
+          };
+        }),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[RA] fetch error:", msg);
+    return { events: [], error: `Resident Advisor: ${msg}` };
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function sortByCity(events: ShowResult[], cityName: string): ShowResult[] {
   const cityLower = cityName.toLowerCase();
@@ -238,17 +370,18 @@ export async function POST(req: NextRequest) {
   const rawCity = bodyCity ?? user.city;
   const cityName = rawCity.split(",")[0].trim();
 
-  const [tm, sg, eb] = await Promise.all([
+  const [tm, sg, eb, ra] = await Promise.all([
     fetchTicketmaster(bandName, cityName),
     fetchSeatGeek(bandName, cityName),
     fetchEventbrite(bandName, cityName),
+    fetchResidentAdvisor(bandName, cityName),
   ]);
 
   // Only surface errors for sources that are configured but failing
-  const apiErrors = [tm.error, sg.error, eb.error].filter(Boolean);
+  const apiErrors = [tm.error, sg.error, eb.error, ra.error].filter(Boolean);
 
   return NextResponse.json({
-    events: mergeAll([tm.events, sg.events, eb.events]),
+    events: mergeAll([tm.events, sg.events, eb.events, ra.events]),
     apiErrors: apiErrors.length ? apiErrors : undefined,
   });
 }
@@ -279,4 +412,21 @@ interface EBEvent {
     minimum_ticket_price?: { value?: number };
     maximum_ticket_price?: { value?: number };
   };
+}
+
+interface RAListing {
+  id: string;
+  event?: RAEvent;
+}
+
+interface RAEvent {
+  id: string;
+  title?: string;
+  date?: string;
+  startTime?: string;
+  contentUrl?: string;
+  images?: { filename?: string; type?: string }[];
+  venue?: { id?: string; name?: string; address?: string; city?: { name?: string } };
+  artists?: { id?: string; name?: string }[];
+  tickets?: { price?: number; url?: string; isAvailable?: boolean }[];
 }

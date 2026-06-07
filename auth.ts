@@ -1,5 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import Spotify from "next-auth/providers/spotify";
+import Instagram from "next-auth/providers/instagram";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 
@@ -17,7 +19,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const user = await prisma.user.findUnique({
           where: { email: credentials.email as string },
         });
-        if (!user) return null;
+        if (!user || !user.password) return null;
         const valid = await bcrypt.compare(
           credentials.password as string,
           user.password
@@ -31,10 +33,33 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         };
       },
     }),
+    Spotify({
+      clientId: process.env.SPOTIFY_CLIENT_ID,
+      clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
+    }),
+    Instagram({
+      clientId: process.env.INSTAGRAM_CLIENT_ID,
+      clientSecret: process.env.INSTAGRAM_CLIENT_SECRET,
+    }),
   ],
   callbacks: {
-    jwt({ token, user }) {
-      if (user) {
+    async jwt({ token, user, account }) {
+      if (account?.type === "oauth" && user) {
+        // Instagram doesn't return email — use provider ID as a stable identifier
+        const email = user.email ?? `${account.providerAccountId}@${account.provider}.oauth`;
+        let dbUser = await prisma.user.findUnique({ where: { email } });
+        if (!dbUser) {
+          dbUser = await prisma.user.create({
+            data: {
+              email,
+              name: user.name ?? email.split("@")[0],
+              city: "",
+            },
+          });
+        }
+        token.id = dbUser.id;
+        token.shareToken = dbUser.shareToken;
+      } else if (user) {
         token.id = user.id;
         token.shareToken = (user as { shareToken?: string }).shareToken;
       }
