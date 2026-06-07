@@ -36,7 +36,12 @@ async function fetchTicketmaster(bandName: string, cityName: string): Promise<Sh
   try {
     const res = await fetch(url);
     const data = await res.json();
+    if (!res.ok || data.errors || data.fault) {
+      console.error("[TM] API error:", JSON.stringify(data).slice(0, 500));
+      return [];
+    }
     const events: TMEvent[] = data?._embedded?.events ?? [];
+    console.log(`[TM] "${bandName}" → ${events.length} events`);
 
     const cityLower = cityName.toLowerCase();
 
@@ -68,7 +73,8 @@ async function fetchTicketmaster(bandName: string, cityName: string): Promise<Sh
         imageUrl: image?.url ?? null,
       };
     });
-  } catch {
+  } catch (err) {
+    console.error("[TM] fetch error:", err);
     return [];
   }
 }
@@ -80,9 +86,13 @@ async function fetchBandsintown(bandName: string, cityName: string): Promise<Sho
 
   try {
     const res = await fetch(url);
-    if (!res.ok) return [];
-    const events: BITEvent[] = await res.json();
-    if (!Array.isArray(events)) return [];
+    const raw = await res.json();
+    if (!res.ok || !Array.isArray(raw)) {
+      console.error("[BIT] API error or unexpected response:", JSON.stringify(raw).slice(0, 300));
+      return [];
+    }
+    const events: BITEvent[] = raw;
+    console.log(`[BIT] "${bandName}" → ${events.length} events`);
 
     const cityLower = cityName.toLowerCase();
 
@@ -118,7 +128,8 @@ async function fetchBandsintown(bandName: string, cityName: string): Promise<Sho
         imageUrl: null,
       };
     });
-  } catch {
+  } catch (err) {
+    console.error("[BIT] fetch error:", err);
     return [];
   }
 }

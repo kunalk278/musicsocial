@@ -11,6 +11,11 @@ export async function GET(req: NextRequest) {
   if (q.length < 2) return NextResponse.json({ attractions: [] });
 
   const apiKey = process.env.TICKETMASTER_API_KEY;
+  if (!apiKey) {
+    console.error("[TM suggest] TICKETMASTER_API_KEY is not set");
+    return NextResponse.json({ attractions: [] });
+  }
+
   const url =
     `https://app.ticketmaster.com/discovery/v2/attractions.json` +
     `?apikey=${apiKey}` +
@@ -21,6 +26,10 @@ export async function GET(req: NextRequest) {
   try {
     const res = await fetch(url);
     const data = await res.json();
+    if (!res.ok || data.errors || data.fault) {
+      console.error("[TM suggest] API error:", JSON.stringify(data).slice(0, 300));
+      return NextResponse.json({ attractions: [] });
+    }
     const attractions = (data?._embedded?.attractions ?? []).map(
       (a: { id: string; name: string; images?: { url: string; width: number }[] }) => ({
         id: a.id,
@@ -28,8 +37,10 @@ export async function GET(req: NextRequest) {
         imageUrl: a.images?.find((i) => i.width >= 100)?.url ?? null,
       })
     );
+    console.log(`[TM suggest] "${q}" → ${attractions.length} attractions`);
     return NextResponse.json({ attractions });
-  } catch {
+  } catch (err) {
+    console.error("[TM suggest] fetch error:", err);
     return NextResponse.json({ attractions: [] });
   }
 }
