@@ -20,24 +20,37 @@ interface ShowResult {
 async function fetchTicketmaster(bandName: string, cityName: string): Promise<ShowResult[]> {
   const apiKey = process.env.TICKETMASTER_API_KEY;
   const now = new Date();
-  const sixMonths = new Date();
-  sixMonths.setMonth(sixMonths.getMonth() + 6);
+  const oneYear = new Date();
+  oneYear.setFullYear(oneYear.getFullYear() + 1);
 
+  // Search broadly (no city filter) — TM city filtering misses nearby venues.
+  // We sort city-matching results to the top after fetching.
   const url =
     `https://app.ticketmaster.com/discovery/v2/events.json` +
     `?apikey=${apiKey}` +
     `&keyword=${encodeURIComponent(bandName)}` +
-    `&city=${encodeURIComponent(cityName)}` +
     `&startDateTime=${now.toISOString().split(".")[0]}Z` +
-    `&endDateTime=${sixMonths.toISOString().split(".")[0]}Z` +
-    `&classificationName=music&size=10&sort=date,asc`;
+    `&endDateTime=${oneYear.toISOString().split(".")[0]}Z` +
+    `&classificationName=music&size=20&sort=date,asc`;
 
   try {
     const res = await fetch(url);
     const data = await res.json();
     const events: TMEvent[] = data?._embedded?.events ?? [];
 
-    return events.map((e) => {
+    const cityLower = cityName.toLowerCase();
+
+    // Sort: user's city first, then by date
+    events.sort((a, b) => {
+      const aCity = (a._embedded?.venues?.[0]?.city?.name ?? "").toLowerCase();
+      const bCity = (b._embedded?.venues?.[0]?.city?.name ?? "").toLowerCase();
+      const aMatch = aCity.includes(cityLower) ? 0 : 1;
+      const bMatch = bCity.includes(cityLower) ? 0 : 1;
+      if (aMatch !== bMatch) return aMatch - bMatch;
+      return (a.dates?.start?.localDate ?? "").localeCompare(b.dates?.start?.localDate ?? "");
+    });
+
+    return events.slice(0, 10).map((e) => {
       const venue = e._embedded?.venues?.[0];
       const priceRange = e.priceRanges?.[0];
       const image = e.images?.find((i) => i.ratio === "16_9" && i.width > 500) ?? e.images?.[0];
@@ -72,31 +85,39 @@ async function fetchBandsintown(bandName: string, cityName: string): Promise<Sho
     if (!Array.isArray(events)) return [];
 
     const cityLower = cityName.toLowerCase();
-    return events
-      .filter((e) => e.venue?.city?.toLowerCase().includes(cityLower))
-      .slice(0, 10)
-      .map((e) => {
-        const dt = e.datetime ? new Date(e.datetime) : null;
-        const date = dt ? dt.toISOString().split("T")[0] : null;
-        const startTime = dt
-          ? `${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`
-          : null;
-        const ticketUrl = e.offers?.[0]?.url ?? null;
 
-        return {
-          externalId: `bit-${e.id}`,
-          source: "Bandsintown",
-          bandName: e.lineup?.[0] ?? bandName,
-          date,
-          venue: e.venue?.name ?? null,
-          city: e.venue ? `${e.venue.city}${e.venue.region ? ", " + e.venue.region : ""}` : null,
-          startTime,
-          ticketUrl,
-          priceMin: null,
-          priceMax: null,
-          imageUrl: null,
-        };
-      });
+    // Sort city matches first, then by date — no hard filter so we don't miss shows
+    events.sort((a, b) => {
+      const aCity = (a.venue?.city ?? "").toLowerCase();
+      const bCity = (b.venue?.city ?? "").toLowerCase();
+      const aMatch = aCity.includes(cityLower) ? 0 : 1;
+      const bMatch = bCity.includes(cityLower) ? 0 : 1;
+      if (aMatch !== bMatch) return aMatch - bMatch;
+      return (a.datetime ?? "").localeCompare(b.datetime ?? "");
+    });
+
+    return events.slice(0, 10).map((e) => {
+      const dt = e.datetime ? new Date(e.datetime) : null;
+      const date = dt ? dt.toISOString().split("T")[0] : null;
+      const startTime = dt
+        ? `${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`
+        : null;
+      const ticketUrl = e.offers?.[0]?.url ?? null;
+
+      return {
+        externalId: `bit-${e.id}`,
+        source: "Bandsintown",
+        bandName: e.lineup?.[0] ?? bandName,
+        date,
+        venue: e.venue?.name ?? null,
+        city: e.venue ? `${e.venue.city}${e.venue.region ? ", " + e.venue.region : ""}` : null,
+        startTime,
+        ticketUrl,
+        priceMin: null,
+        priceMax: null,
+        imageUrl: null,
+      };
+    });
   } catch {
     return [];
   }
@@ -125,7 +146,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { bandName } = await req.json();
+  const { bandName, city: bodyCity } = await req.json();
   if (!bandName) {
     return NextResponse.json({ error: "bandName required" }, { status: 400 });
   }
@@ -133,7 +154,9 @@ export async function POST(req: NextRequest) {
   const user = await prisma.user.findUnique({ where: { id: session.user.id } });
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-  const cityName = user.city.split(",")[0].trim();
+  // Use caller-supplied city if provided, otherwise fall back to user's saved city
+  const rawCity = bodyCity ?? user.city;
+  const cityName = rawCity.split(",")[0].trim();
 
   const [tm, bit] = await Promise.all([
     fetchTicketmaster(bandName, cityName),

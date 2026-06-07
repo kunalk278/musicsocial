@@ -50,6 +50,12 @@ export default function AddPage() {
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
 
+  // City state
+  const [userCity, setUserCity] = useState("");
+  const [searchCity, setSearchCity] = useState("");
+  const [editingCity, setEditingCity] = useState(false);
+  const [cityDraft, setCityDraft] = useState("");
+
   // Manual form state (shown inline when no results)
   const [manualDate, setManualDate] = useState("");
   const [manualVenue, setManualVenue] = useState("");
@@ -66,10 +72,23 @@ export default function AddPage() {
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const cityInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/signin");
   }, [status, router]);
+
+  // Load user's city
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    fetch("/api/me").then((r) => r.json()).then((u) => {
+      if (u?.city) {
+        setUserCity(u.city);
+        setSearchCity(u.city);
+        setCityDraft(u.city);
+      }
+    });
+  }, [status]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -94,19 +113,19 @@ export default function AddPage() {
     return () => { if (suggestDebounce.current) clearTimeout(suggestDebounce.current); };
   }, [bandName]);
 
-  // Show search — 800ms
+  // Show search — 800ms, re-runs when city changes too
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current);
     setResults([]);
     setSearched(false);
-    if (bandName.trim().length < 2) return;
+    if (bandName.trim().length < 2 || !searchCity) return;
     searchDebounce.current = setTimeout(async () => {
       setSearching(true);
       try {
         const res = await fetch("/api/concerts/lookup", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ bandName: bandName.trim() }),
+          body: JSON.stringify({ bandName: bandName.trim(), city: searchCity }),
         });
         const data = await res.json();
         setResults(data.events ?? []);
@@ -116,7 +135,7 @@ export default function AddPage() {
       }
     }, 800);
     return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); };
-  }, [bandName]);
+  }, [bandName, searchCity]);
 
   if (status === "loading") return null;
   if (status !== "authenticated") return null;
@@ -142,7 +161,7 @@ export default function AddPage() {
       bandName,
       date: manualDate,
       venue: manualVenue || null,
-      city: manualCity || null,
+      city: manualCity || searchCity || null,
       startTime: null,
       ticketUrl: null,
       priceMin: null,
@@ -150,6 +169,13 @@ export default function AddPage() {
       imageUrl: null,
     });
     setStep("confirm");
+  }
+
+  function commitCity() {
+    const trimmed = cityDraft.trim();
+    if (trimmed) setSearchCity(trimmed);
+    else setCityDraft(searchCity); // revert if cleared
+    setEditingCity(false);
   }
 
   async function handleSave() {
@@ -169,6 +195,8 @@ export default function AddPage() {
     }
   }
 
+  const cityChanged = searchCity && searchCity !== userCity;
+
   return (
     <div className="flex flex-col min-h-screen">
       <Nav userName={session.user?.name ?? ""} />
@@ -178,11 +206,11 @@ export default function AddPage() {
           <>
             <h1 className="text-2xl font-bold text-white mb-2">Add a show</h1>
             <p className="text-gray-500 text-sm mb-6">
-              Type an artist — we&apos;ll search Ticketmaster and Bandsintown for upcoming shows in your city.
+              Type an artist — we&apos;ll search Ticketmaster and Bandsintown for upcoming shows.
             </p>
 
             {/* Band input + artist suggestions */}
-            <div ref={containerRef} className="relative mb-6">
+            <div ref={containerRef} className="relative mb-3">
               <input
                 ref={inputRef}
                 type="text"
@@ -222,11 +250,57 @@ export default function AddPage() {
               )}
             </div>
 
+            {/* City context row */}
+            {searchCity && (
+              <div className="flex items-center gap-2 mb-6 min-h-[28px]">
+                {editingCity ? (
+                  <>
+                    <span className="text-xs text-gray-500">Searching near</span>
+                    <input
+                      ref={cityInputRef}
+                      autoFocus
+                      type="text"
+                      value={cityDraft}
+                      onChange={(e) => setCityDraft(e.target.value)}
+                      onBlur={commitCity}
+                      onKeyDown={(e) => { if (e.key === "Enter") commitCity(); if (e.key === "Escape") { setCityDraft(searchCity); setEditingCity(false); } }}
+                      className="bg-white/5 border border-purple-500/60 rounded-lg px-2 py-0.5 text-white text-xs focus:outline-none w-44"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xs text-gray-500">
+                      Searching near{" "}
+                      <span className={cityChanged ? "text-purple-400" : "text-gray-300"}>
+                        {searchCity}
+                      </span>
+                      {cityChanged && (
+                        <button
+                          type="button"
+                          onClick={() => { setCityDraft(userCity); setSearchCity(userCity); }}
+                          className="ml-1 text-gray-600 hover:text-gray-400 underline transition-colors"
+                        >
+                          (reset)
+                        </button>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => { setCityDraft(searchCity); setEditingCity(true); }}
+                      className="text-xs text-gray-600 hover:text-purple-400 transition-colors underline"
+                    >
+                      Change
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Show results */}
             {results.length > 0 && (
               <div className="space-y-3">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
-                  Upcoming shows in your city
+                  Upcoming shows
                 </p>
                 {results.map((show) => (
                   <button
