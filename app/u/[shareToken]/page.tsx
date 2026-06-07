@@ -69,7 +69,7 @@ export default function PublicSharePage() {
           <Link href="/" className="font-bold text-lg tracking-tight text-purple-400">
             ShowShare
           </Link>
-          <Link href="/signup" className="text-sm text-gray-400 hover:text-white transition-colors">
+          <Link href={`/signup?from=${shareToken}`} className="text-sm text-gray-400 hover:text-white transition-colors">
             Create account
           </Link>
         </div>
@@ -90,7 +90,7 @@ export default function PublicSharePage() {
               {followMsg || "Copy link to share"}
             </button>
             <Link
-              href={`/friends?follow=${shareToken}`}
+              href={`/signin?from=${shareToken}`}
               className="text-sm bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg transition-colors"
             >
               Follow {owner?.name}

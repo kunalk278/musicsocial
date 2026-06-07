@@ -1,11 +1,14 @@
 "use client";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-export default function SignInPage() {
+function SignInContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const from = searchParams.get("from");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -20,7 +23,17 @@ export default function SignInPage() {
     if (res?.error) {
       setError("Invalid email or password.");
     } else {
-      router.push("/");
+      if (from) {
+        // Follow the friend automatically then go to their page
+        await fetch("/api/follows", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ shareToken: from }),
+        });
+        router.push(`/u/${from}`);
+      } else {
+        router.push("/");
+      }
       router.refresh();
     }
   }
@@ -30,7 +43,9 @@ export default function SignInPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-purple-400">ShowShare</h1>
-          <p className="text-gray-400 mt-2 text-sm">See what concerts your friends are going to</p>
+          <p className="text-gray-400 mt-2 text-sm">
+            {from ? "Sign in to follow and see their shows" : "See what concerts your friends are going to"}
+          </p>
         </div>
         <form onSubmit={handleSubmit} className="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-4">
           <h2 className="font-semibold text-white text-lg">Sign in</h2>
@@ -66,12 +81,20 @@ export default function SignInPage() {
           </button>
           <p className="text-center text-sm text-gray-500">
             No account?{" "}
-            <Link href="/signup" className="text-purple-400 hover:text-purple-300">
+            <Link href={from ? `/signup?from=${from}` : "/signup"} className="text-purple-400 hover:text-purple-300">
               Create one
             </Link>
           </p>
         </form>
       </div>
     </div>
+  );
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense fallback={null}>
+      <SignInContent />
+    </Suspense>
   );
 }

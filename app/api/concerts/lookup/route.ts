@@ -8,9 +8,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { bandName, date } = await req.json();
-  if (!bandName || !date) {
-    return NextResponse.json({ error: "bandName and date required" }, { status: 400 });
+  const { bandName } = await req.json();
+  if (!bandName) {
+    return NextResponse.json({ error: "bandName required" }, { status: 400 });
   }
 
   const user = await prisma.user.findUnique({ where: { id: session.user.id } });
@@ -20,15 +20,11 @@ export async function POST(req: NextRequest) {
   const city = encodeURIComponent(user.city);
   const keyword = encodeURIComponent(bandName);
 
-  // Build date range: ±3 days around the provided date
-  const targetDate = new Date(date);
-  const start = new Date(targetDate);
-  start.setDate(start.getDate() - 3);
-  const end = new Date(targetDate);
-  end.setDate(end.getDate() + 3);
-
-  const startDateTime = start.toISOString().split(".")[0] + "Z";
-  const endDateTime = end.toISOString().split(".")[0] + "Z";
+  const now = new Date();
+  const sixMonths = new Date();
+  sixMonths.setMonth(sixMonths.getMonth() + 6);
+  const startDateTime = now.toISOString().split(".")[0] + "Z";
+  const endDateTime = sixMonths.toISOString().split(".")[0] + "Z";
 
   const url =
     `https://app.ticketmaster.com/discovery/v2/events.json` +
@@ -38,7 +34,7 @@ export async function POST(req: NextRequest) {
     `&startDateTime=${startDateTime}` +
     `&endDateTime=${endDateTime}` +
     `&classificationName=music` +
-    `&size=5` +
+    `&size=10` +
     `&sort=date,asc`;
 
   let events: TMEvent[] = [];
@@ -54,16 +50,14 @@ export async function POST(req: NextRequest) {
     const venue = e._embedded?.venues?.[0];
     const priceRange = e.priceRanges?.[0];
     const image = e.images?.find((i: TMImage) => i.ratio === "16_9" && i.width > 500) ?? e.images?.[0];
-    const localDate = e.dates?.start?.localDate ?? date;
-    const localTime = e.dates?.start?.localTime;
 
     return {
       externalId: e.id,
       bandName: e.name,
-      date: localDate,
+      date: e.dates?.start?.localDate ?? null,
       venue: venue?.name ?? null,
       city: venue ? `${venue.city?.name}${venue.stateCode ? ", " + venue.stateCode : ""}` : null,
-      startTime: localTime ? localTime.slice(0, 5) : null,
+      startTime: e.dates?.start?.localTime ? e.dates.start.localTime.slice(0, 5) : null,
       ticketUrl: e.url ?? null,
       priceMin: priceRange?.min ?? null,
       priceMax: priceRange?.max ?? null,

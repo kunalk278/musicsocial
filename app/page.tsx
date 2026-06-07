@@ -27,11 +27,17 @@ export default function FeedPage() {
 
   useEffect(() => {
     if (status !== "authenticated") return;
-    fetch("/api/feed")
-      .then((r) => r.json())
-      .then((d) => {
-        setConcerts(d.concerts ?? []);
-        setFriends(d.friends ?? []);
+    Promise.all([
+      fetch("/api/feed").then((r) => r.json()),
+      fetch("/api/concerts").then((r) => r.json()),
+    ]).then(([feed, myConcerts]) => {
+        setConcerts(feed.concerts ?? []);
+        setFriends(feed.friends ?? []);
+        // New user with no shows — send them to add their first show
+        if ((myConcerts ?? []).length === 0) {
+          router.push("/add");
+          return;
+        }
         setLoading(false);
       });
   }, [status]);

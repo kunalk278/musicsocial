@@ -1,7 +1,7 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { Suspense, useState, useRef, useEffect } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 const US_METROS = [
@@ -30,43 +30,25 @@ const US_METROS = [
   "Birmingham, AL", "Rochester, NY", "Richmond, VA", "Spokane, WA",
   "Des Moines, IA", "Montgomery, AL", "Modesto, CA", "Fayetteville, NC",
   "Tacoma, WA", "Akron, OH", "Grand Rapids, MI", "Oxnard, CA",
-  "Little Rock, AR", "Huntington Beach, CA", "Salt Lake City, UT",
-  "Tallahassee, FL", "Huntsville, AL", "Worcester, MA", "Knoxville, TN",
-  "Providence, RI", "Brownsville, TX", "Santa Clarita, CA", "Garden Grove, CA",
-  "Oceanside, CA", "Fort Lauderdale, FL", "Chattanooga, TN", "Columbus, GA",
-  "Tempe, AZ", "Ontario, CA", "Hartford, CT", "Shreveport, LA",
-  "Aurora, IL", "Mobile, AL", "Elk Grove, CA", "Clarksville, TN",
-  "Salem, OR", "Cary, NC", "Rockford, IL", "Fort Collins, CO",
-  "Jackson, MS", "Alexandria, VA", "Torrance, CA", "Cape Coral, FL",
-  "Thousand Oaks, CA", "Visalia, CA", "Surprise, AZ", "Peoria, IL",
-  "Lancaster, CA", "Pasadena, TX", "Hayward, CA", "Pomona, CA",
-  "Palmdale, CA", "Escondido, CA", "Kansas City, KS", "Sunnyvale, CA",
-  "Savannah, GA", "Bridgeport, CT", "Paterson, NJ", "Syracuse, NY",
-  "McAllen, TX", "Pasadena, CA", "Mesquite, TX", "Roseville, CA",
-  "Lakewood, CO", "Torrington, CT", "Hollywood, FL", "Macon, GA",
-  "Salinas, CA", "Springfield, MO", "Corona, CA", "Bellevue, WA",
-  "Dayton, OH", "Warren, MI", "Hampton, VA", "Columbia, SC",
-  "Sterling Heights, MI", "New Haven, CT", "Waco, TX", "Olathe, KS",
-  "Cedar Rapids, IA", "Topeka, KS", "Sioux Falls, SD", "Boise, ID",
-  "Fargo, ND", "Shreveport, LA", "Buffalo, NY", "Bakersfield, CA",
+  "Little Rock, AR", "Salt Lake City, UT", "Tallahassee, FL",
+  "Huntsville, AL", "Worcester, MA", "Knoxville, TN", "Providence, RI",
+  "Brownsville, TX", "Fort Lauderdale, FL", "Chattanooga, TN",
+  "Hartford, CT", "Shreveport, LA", "Aurora, IL", "Mobile, AL",
+  "Clarksville, TN", "Salem, OR", "Cary, NC", "Rockford, IL",
+  "Fort Collins, CO", "Jackson, MS", "Cape Coral, FL", "Savannah, GA",
+  "Bridgeport, CT", "Syracuse, NY", "McAllen, TX", "Pasadena, CA",
+  "Bellevue, WA", "Dayton, OH", "Buffalo, NY", "Boise, ID",
+  "Fargo, ND", "Sioux Falls, SD",
 ];
 
-function CityAutocomplete({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
+function CityAutocomplete({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const filtered = query.length < 1
     ? []
-    : US_METROS.filter((m) =>
-        m.toLowerCase().includes(query.toLowerCase())
-      ).slice(0, 8);
+    : US_METROS.filter((m) => m.toLowerCase().includes(query.toLowerCase())).slice(0, 8);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -84,19 +66,12 @@ function CityAutocomplete({
     setOpen(false);
   }
 
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const v = e.target.value;
-    setQuery(v);
-    onChange(v);
-    setOpen(true);
-  }
-
   return (
     <div ref={containerRef} className="relative">
       <input
         type="text"
         value={query}
-        onChange={handleChange}
+        onChange={(e) => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         required
         autoComplete="off"
@@ -122,8 +97,11 @@ function CityAutocomplete({
   );
 }
 
-export default function SignUpPage() {
+function SignUpContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const from = searchParams.get("from");
+
   const [form, setForm] = useState({ name: "", email: "", password: "", city: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -151,7 +129,18 @@ export default function SignUpPage() {
     }
 
     await signIn("credentials", { email: form.email, password: form.password, redirect: false });
-    router.push("/");
+
+    if (from) {
+      // Came from a friend's share page — follow them then go to their page
+      await fetch("/api/follows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shareToken: from }),
+      });
+      router.push(`/u/${from}`);
+    } else {
+      router.push("/add");
+    }
     router.refresh();
   }
 
@@ -160,7 +149,9 @@ export default function SignUpPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-purple-400">ShowShare</h1>
-          <p className="text-gray-400 mt-2 text-sm">Share concerts with your friends</p>
+          <p className="text-gray-400 mt-2 text-sm">
+            {from ? "Create an account to follow and see their shows" : "Share concerts with your friends"}
+          </p>
         </div>
         <form onSubmit={handleSubmit} className="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-4">
           <h2 className="font-semibold text-white text-lg">Create account</h2>
@@ -198,12 +189,20 @@ export default function SignUpPage() {
           </button>
           <p className="text-center text-sm text-gray-500">
             Already have an account?{" "}
-            <Link href="/signin" className="text-purple-400 hover:text-purple-300">
+            <Link href={from ? `/signin?from=${from}` : "/signin"} className="text-purple-400 hover:text-purple-300">
               Sign in
             </Link>
           </p>
         </form>
       </div>
     </div>
+  );
+}
+
+export default function SignUpPage() {
+  return (
+    <Suspense fallback={null}>
+      <SignUpContent />
+    </Suspense>
   );
 }
