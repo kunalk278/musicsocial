@@ -12,6 +12,7 @@ interface Artist {
 
 interface ShowResult {
   externalId: string;
+  source?: string;
   bandName: string;
   date: string | null;
   venue: string | null;
@@ -41,12 +42,20 @@ export default function AddPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
+  // Search state
   const [bandName, setBandName] = useState("");
   const [suggestions, setSuggestions] = useState<Artist[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [results, setResults] = useState<ShowResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
+
+  // Manual form state (shown inline when no results)
+  const [manualDate, setManualDate] = useState("");
+  const [manualVenue, setManualVenue] = useState("");
+  const [manualCity, setManualCity] = useState("");
+
+  // Confirm step state
   const [selected, setSelected] = useState<ShowResult | null>(null);
   const [concertStatus, setConcertStatus] = useState("INTERESTED");
   const [step, setStep] = useState<Step>("search");
@@ -62,7 +71,6 @@ export default function AddPage() {
     if (status === "unauthenticated") router.push("/signin");
   }, [status, router]);
 
-  // Close suggestions on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -73,29 +81,25 @@ export default function AddPage() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  // Artist autocomplete (fast, 300ms)
+  // Artist autocomplete — 300ms
   useEffect(() => {
     if (suggestDebounce.current) clearTimeout(suggestDebounce.current);
     if (bandName.trim().length < 2) { setSuggestions([]); return; }
-
     suggestDebounce.current = setTimeout(async () => {
       const res = await fetch(`/api/concerts/suggest?q=${encodeURIComponent(bandName.trim())}`);
       const data = await res.json();
       setSuggestions(data.attractions ?? []);
       setShowSuggestions(true);
     }, 300);
-
     return () => { if (suggestDebounce.current) clearTimeout(suggestDebounce.current); };
   }, [bandName]);
 
-  // Show search (slower, 800ms — fires on band name change)
+  // Show search — 800ms
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current);
     setResults([]);
     setSearched(false);
-
     if (bandName.trim().length < 2) return;
-
     searchDebounce.current = setTimeout(async () => {
       setSearching(true);
       try {
@@ -111,12 +115,13 @@ export default function AddPage() {
         setSearched(true);
       }
     }, 800);
-
     return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); };
   }, [bandName]);
 
   if (status === "loading") return null;
   if (status !== "authenticated") return null;
+
+  const noResults = searched && !searching && results.length === 0 && bandName.trim().length >= 2;
 
   function pickArtist(name: string) {
     setBandName(name);
@@ -130,25 +135,31 @@ export default function AddPage() {
     setStep("confirm");
   }
 
-  function goBack() {
-    setSelected(null);
-    setStep("search");
+  function submitManual() {
+    if (!manualDate) return;
+    setSelected({
+      externalId: "",
+      bandName,
+      date: manualDate,
+      venue: manualVenue || null,
+      city: manualCity || null,
+      startTime: null,
+      ticketUrl: null,
+      priceMin: null,
+      priceMax: null,
+      imageUrl: null,
+    });
+    setStep("confirm");
   }
 
   async function handleSave() {
     setSaving(true);
     setError("");
-
-    const body = selected
-      ? { ...selected, status: concertStatus }
-      : { bandName, status: concertStatus };
-
     const res = await fetch("/api/concerts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...selected, status: concertStatus }),
     });
-
     setSaving(false);
     if (res.ok) {
       router.push("/my-concerts");
@@ -167,10 +178,10 @@ export default function AddPage() {
           <>
             <h1 className="text-2xl font-bold text-white mb-2">Add a show</h1>
             <p className="text-gray-500 text-sm mb-6">
-              Type an artist — we&apos;ll find upcoming shows in your city.
+              Type an artist — we&apos;ll search Ticketmaster and Bandsintown for upcoming shows in your city.
             </p>
 
-            {/* Band input with artist autocomplete */}
+            {/* Band input + artist suggestions */}
             <div ref={containerRef} className="relative mb-6">
               <input
                 ref={inputRef}
@@ -189,7 +200,6 @@ export default function AddPage() {
                 </div>
               )}
 
-              {/* Artist suggestions dropdown */}
               {showSuggestions && suggestions.length > 0 && (
                 <ul className="absolute z-50 mt-1 w-full bg-[#14141f] border border-white/10 rounded-xl overflow-hidden shadow-2xl">
                   {suggestions.map((a) => (
@@ -202,7 +212,7 @@ export default function AddPage() {
                         {a.imageUrl ? (
                           <img src={a.imageUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
                         ) : (
-                          <div className="w-8 h-8 rounded-full bg-white/10 shrink-0 flex items-center justify-center text-xs text-gray-500">🎵</div>
+                          <div className="w-8 h-8 rounded-full bg-white/10 shrink-0 flex items-center justify-center text-xs">🎵</div>
                         )}
                         <span className="text-sm text-white">{a.name}</span>
                       </button>
@@ -213,22 +223,6 @@ export default function AddPage() {
             </div>
 
             {/* Show results */}
-            {searched && results.length === 0 && bandName.trim().length >= 2 && !searching && (
-              <div className="text-center py-10">
-                <p className="text-gray-400 mb-1">No upcoming shows found in your city.</p>
-                <p className="text-gray-600 text-sm">
-                  You can still{" "}
-                  <button
-                    onClick={() => pickShow({ externalId: "", bandName, date: null, venue: null, city: null, startTime: null, ticketUrl: null, priceMin: null, priceMax: null, imageUrl: null })}
-                    className="text-purple-400 hover:text-purple-300 underline"
-                  >
-                    add it manually
-                  </button>
-                  .
-                </p>
-              </div>
-            )}
-
             {results.length > 0 && (
               <div className="space-y-3">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
@@ -245,10 +239,16 @@ export default function AddPage() {
                         <img src={show.imageUrl} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" />
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-white">{show.bandName}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-white">{show.bandName}</p>
+                          {show.source && (
+                            <span className="text-xs text-gray-600 border border-white/10 rounded px-1.5 py-0.5">
+                              {show.source}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-sm text-gray-400 mt-0.5 truncate">
-                          {show.venue ?? "Venue TBD"}
-                          {show.city ? ` · ${show.city}` : ""}
+                          {show.venue ?? "Venue TBD"}{show.city ? ` · ${show.city}` : ""}
                         </p>
                         <p className="text-sm text-gray-500 mt-0.5">
                           {show.date ? formatDate(show.date) : "Date TBD"}
@@ -262,15 +262,75 @@ export default function AddPage() {
                 ))}
               </div>
             )}
+
+            {/* Manual form — appears immediately when no results found */}
+            {noResults && (
+              <div className="mt-2">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="flex-1 h-px bg-white/10" />
+                  <p className="text-xs text-gray-500 shrink-0">No shows found — add it manually</p>
+                  <div className="flex-1 h-px bg-white/10" />
+                </div>
+
+                <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-4">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1.5">Artist / Band</label>
+                    <input
+                      type="text"
+                      value={bandName}
+                      onChange={(e) => setBandName(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1.5">Date *</label>
+                    <input
+                      type="date"
+                      value={manualDate}
+                      onChange={(e) => setManualDate(e.target.value)}
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1.5">Venue <span className="text-gray-600">(optional)</span></label>
+                      <input
+                        type="text"
+                        value={manualVenue}
+                        onChange={(e) => setManualVenue(e.target.value)}
+                        placeholder="e.g. Madison Square Garden"
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-700 focus:outline-none focus:border-purple-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1.5">City <span className="text-gray-600">(optional)</span></label>
+                      <input
+                        type="text"
+                        value={manualCity}
+                        onChange={(e) => setManualCity(e.target.value)}
+                        placeholder="e.g. New York, NY"
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-700 focus:outline-none focus:border-purple-500"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    onClick={submitManual}
+                    disabled={!manualDate || !bandName.trim()}
+                    className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white font-medium py-2.5 rounded-lg transition-colors text-sm"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
 
         {step === "confirm" && selected && (
           <>
-            <button
-              onClick={goBack}
-              className="text-sm text-gray-500 hover:text-white transition-colors mb-6 flex items-center gap-1"
-            >
+            <button onClick={() => { setSelected(null); setStep("search"); }}
+              className="text-sm text-gray-500 hover:text-white transition-colors mb-6 flex items-center gap-1">
               ← Back
             </button>
 
@@ -283,9 +343,7 @@ export default function AddPage() {
               <div className="p-4 space-y-1.5">
                 <p className="font-bold text-white text-lg">{selected.bandName}</p>
                 {selected.venue && (
-                  <p className="text-sm text-gray-400">
-                    📍 {selected.venue}{selected.city ? ` · ${selected.city}` : ""}
-                  </p>
+                  <p className="text-sm text-gray-400">📍 {selected.venue}{selected.city ? ` · ${selected.city}` : ""}</p>
                 )}
                 {selected.date && (
                   <p className="text-sm text-gray-400">
