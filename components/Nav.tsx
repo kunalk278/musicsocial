@@ -18,7 +18,7 @@ export default function Nav({ userName }: { userName: string }) {
     <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#0a0a0f]/90 backdrop-blur">
       <div className="max-w-5xl mx-auto px-4 flex items-center justify-between h-14">
         <Link href="/" className="font-bold text-lg tracking-tight text-purple-400">
-          ShowShare
+          Bandwagon
         </Link>
         <div className="flex items-center gap-1">
           {links.map((l) => (

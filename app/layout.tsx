@@ -3,7 +3,7 @@ import "./globals.css";
 import SessionProvider from "@/components/SessionProvider";
 
 export const metadata: Metadata = {
-  title: "ShowShare — Share concerts with friends",
+  title: "Bandwagon — Share concerts with friends",
   description: "See what concerts your friends are going to and join them.",
 };
 

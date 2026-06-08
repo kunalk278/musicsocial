@@ -67,7 +67,7 @@ export default function PublicSharePage() {
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0a0a0f]/90 backdrop-blur">
         <div className="max-w-5xl mx-auto px-4 flex items-center justify-between h-14">
           <Link href="/" className="font-bold text-lg tracking-tight text-purple-400">
-            ShowShare
+            Bandwagon
           </Link>
           <Link href={`/signup?from=${shareToken}`} className="text-sm text-gray-400 hover:text-white transition-colors">
             Create account

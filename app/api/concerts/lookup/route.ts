@@ -268,7 +268,7 @@ async function fetchResidentAdvisor(bandName: string, cityName: string): Promise
       headers: {
         "Content-Type": "application/json",
         "Referer": "https://ra.co/",
-        "User-Agent": "Mozilla/5.0 (compatible; showshare/1.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; bandwagon/1.0)",
         "ra-content-language": "en",
       },
       body: JSON.stringify({

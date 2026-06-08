@@ -79,7 +79,7 @@ function SignUpContent() {
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-purple-400">ShowShare</h1>
+          <h1 className="text-3xl font-bold text-purple-400">Bandwagon</h1>
           <p className="text-gray-400 mt-2 text-sm">
             {from ? "Create an account to follow and see their shows" : "Share concerts with your friends"}
           </p>
