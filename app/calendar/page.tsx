@@ -143,37 +143,27 @@ export default function CalendarPage() {
                 const isToday = isSameDay(day, today);
                 const isSelected = selectedDay ? isSameDay(day, selectedDay) : false;
 
+                const bgClass = isSelected
+                  ? "bg-purple-600 ring-2 ring-purple-400"
+                  : hasMine && hasFriends
+                  ? "bg-gradient-to-br from-purple-600/60 to-teal-500/50"
+                  : hasMine
+                  ? "bg-purple-600/50"
+                  : hasFriends
+                  ? "bg-teal-500/40"
+                  : isToday
+                  ? "bg-white/10"
+                  : "hover:bg-white/5";
+
                 return (
                   <button
                     key={i}
                     onClick={() => setSelectedDay(isSelected ? null : day)}
-                    className={`relative aspect-square rounded-lg flex flex-col items-center justify-center text-sm transition-all ${
-                      isSelected
-                        ? "bg-purple-600 text-white ring-2 ring-purple-400"
-                        : isToday
-                        ? "bg-white/10 text-white"
-                        : "hover:bg-white/5 text-gray-300"
+                    className={`relative aspect-square rounded-lg flex items-center justify-center text-sm transition-all ${bgClass} ${
+                      hasMine || hasFriends || isSelected ? "text-white" : "text-gray-300"
                     }`}
                   >
                     <span className="text-xs leading-none">{day.getDate()}</span>
-                    {(hasMine || hasFriends) && (
-                      <div className="flex gap-0.5 mt-1">
-                        {hasMine && (
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              isSelected ? "bg-white" : "bg-purple-500"
-                            }`}
-                          />
-                        )}
-                        {hasFriends && (
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              isSelected ? "bg-white/70" : "bg-teal-400"
-                            }`}
-                          />
-                        )}
-                      </div>
-                    )}
                   </button>
                 );
               })}
