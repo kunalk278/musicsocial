@@ -5,25 +5,27 @@ import { useRouter } from "next/navigation";
 import Nav from "@/components/Nav";
 import ConcertCard, { Concert } from "@/components/ConcertCard";
 
-function getWeekStart(date: Date) {
-  const d = new Date(date);
-  d.setDate(d.getDate() - d.getDay());
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
 function formatMonth(date: Date) {
   return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
 function isSameDay(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function dateKey(d: Date) {
+  return d.toISOString().split("T")[0];
 }
 
 export default function CalendarPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const [concerts, setConcerts] = useState<Concert[]>([]);
+  const [myConcerts, setMyConcerts] = useState<Concert[]>([]);
+  const [friendConcerts, setFriendConcerts] = useState<Concert[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
@@ -34,12 +36,14 @@ export default function CalendarPage() {
 
   useEffect(() => {
     if (status !== "authenticated") return;
-    fetch("/api/feed")
-      .then((r) => r.json())
-      .then((d) => {
-        setConcerts(d.concerts ?? []);
-        setLoading(false);
-      });
+    Promise.all([
+      fetch("/api/concerts").then((r) => r.json()),
+      fetch("/api/feed").then((r) => r.json()),
+    ]).then(([mine, feed]) => {
+      setMyConcerts(Array.isArray(mine) ? mine : []);
+      setFriendConcerts(feed.concerts ?? []);
+      setLoading(false);
+    });
   }, [status]);
 
   if (status === "loading" || loading) {
@@ -52,6 +56,19 @@ export default function CalendarPage() {
 
   if (status !== "authenticated") return null;
 
+  // Build date lookup maps
+  const myDates = new Map<string, Concert[]>();
+  for (const c of myConcerts) {
+    if (!myDates.has(c.date)) myDates.set(c.date, []);
+    myDates.get(c.date)!.push(c);
+  }
+
+  const friendDates = new Map<string, Concert[]>();
+  for (const c of friendConcerts) {
+    if (!friendDates.has(c.date)) friendDates.set(c.date, []);
+    friendDates.get(c.date)!.push(c);
+  }
+
   // Build calendar grid
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
@@ -62,17 +79,14 @@ export default function CalendarPage() {
     ...Array(startPad).fill(null),
     ...Array.from({ length: lastDay.getDate() }, (_, i) => new Date(year, month, i + 1)),
   ];
-  // Fill to complete weeks
   while (days.length % 7 !== 0) days.push(null);
 
-  function concertsOnDay(day: Date) {
-    const str = day.toISOString().split("T")[0];
-    return concerts.filter((c) => c.date === str);
-  }
-
-  const selectedConcerts = selectedDay ? concertsOnDay(selectedDay) : [];
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  const selectedKey = selectedDay ? dateKey(selectedDay) : null;
+  const selectedMine = selectedKey ? (myDates.get(selectedKey) ?? []) : [];
+  const selectedFriends = selectedKey ? (friendDates.get(selectedKey) ?? []) : [];
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -80,8 +94,20 @@ export default function CalendarPage() {
       <main className="max-w-5xl mx-auto w-full px-4 py-8">
         <h1 className="text-2xl font-bold text-white mb-6">Calendar</h1>
 
+        {/* Legend */}
+        <div className="flex items-center gap-4 mb-4 text-xs text-gray-400">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" />
+            Your shows
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-teal-400 inline-block" />
+            Friends&apos; shows
+          </span>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Calendar */}
+          {/* Calendar grid */}
           <div className="lg:col-span-2 bg-white/5 border border-white/10 rounded-2xl p-5">
             <div className="flex items-center justify-between mb-4">
               <button
@@ -110,29 +136,43 @@ export default function CalendarPage() {
             <div className="grid grid-cols-7 gap-1">
               {days.map((day, i) => {
                 if (!day) return <div key={i} />;
-                const shows = concertsOnDay(day);
+
+                const key = dateKey(day);
+                const hasMine = myDates.has(key);
+                const hasFriends = friendDates.has(key);
                 const isToday = isSameDay(day, today);
-                const isSelected = selectedDay && isSameDay(day, selectedDay);
+                const isSelected = selectedDay ? isSameDay(day, selectedDay) : false;
 
                 return (
                   <button
                     key={i}
-                    onClick={() => setSelectedDay(day)}
+                    onClick={() => setSelectedDay(isSelected ? null : day)}
                     className={`relative aspect-square rounded-lg flex flex-col items-center justify-center text-sm transition-all ${
                       isSelected
-                        ? "bg-purple-600 text-white"
+                        ? "bg-purple-600 text-white ring-2 ring-purple-400"
                         : isToday
                         ? "bg-white/10 text-white"
                         : "hover:bg-white/5 text-gray-300"
                     }`}
                   >
-                    <span className="text-xs">{day.getDate()}</span>
-                    {shows.length > 0 && (
-                      <span
-                        className={`mt-0.5 w-1 h-1 rounded-full ${
-                          isSelected ? "bg-white" : "bg-purple-400"
-                        }`}
-                      />
+                    <span className="text-xs leading-none">{day.getDate()}</span>
+                    {(hasMine || hasFriends) && (
+                      <div className="flex gap-0.5 mt-1">
+                        {hasMine && (
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              isSelected ? "bg-white" : "bg-purple-500"
+                            }`}
+                          />
+                        )}
+                        {hasFriends && (
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              isSelected ? "bg-white/70" : "bg-teal-400"
+                            }`}
+                          />
+                        )}
+                      </div>
                     )}
                   </button>
                 );
@@ -143,17 +183,42 @@ export default function CalendarPage() {
           {/* Day panel */}
           <div>
             {selectedDay ? (
-              <div>
-                <h3 className="text-sm font-semibold text-gray-400 mb-3">
-                  {selectedDay.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+              <div className="space-y-5">
+                <h3 className="text-sm font-semibold text-gray-400">
+                  {selectedDay.toLocaleDateString("en-US", {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                  })}
                 </h3>
-                {selectedConcerts.length === 0 ? (
+
+                {selectedMine.length === 0 && selectedFriends.length === 0 && (
                   <p className="text-gray-600 text-sm">No shows this day.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {selectedConcerts.map((c) => (
-                      <ConcertCard key={c.id} concert={c} showFriend />
-                    ))}
+                )}
+
+                {selectedMine.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-purple-400 uppercase tracking-widest mb-2">
+                      Your shows
+                    </p>
+                    <div className="space-y-3">
+                      {selectedMine.map((c) => (
+                        <ConcertCard key={c.id} concert={c} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedFriends.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-teal-400 uppercase tracking-widest mb-2">
+                      Friends&apos; shows
+                    </p>
+                    <div className="space-y-3">
+                      {selectedFriends.map((c) => (
+                        <ConcertCard key={c.id} concert={c} showFriend />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
