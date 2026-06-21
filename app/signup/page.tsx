@@ -118,10 +118,10 @@ function SignUpContent() {
           <form onSubmit={handleSubmit} className="space-y-3">
             {error && <p className="text-red-400 text-sm">{error}</p>}
             {[
-              { field: "name", label: "Your name", type: "text", placeholder: "Jamie Smith" },
-              { field: "email", label: "Email", type: "email", placeholder: "you@example.com" },
-              { field: "password", label: "Password", type: "password", placeholder: "••••••••" },
-            ].map(({ field, label, type, placeholder }) => (
+              { field: "name", label: "Your name", type: "text", placeholder: "Jamie Smith", minLength: undefined },
+              { field: "email", label: "Email", type: "email", placeholder: "you@example.com", minLength: undefined },
+              { field: "password", label: "Password", type: "password", placeholder: "••••••••", minLength: 8 },
+            ].map(({ field, label, type, placeholder, minLength }) => (
               <div key={field}>
                 <label className="block text-sm text-gray-400 mb-1">{label}</label>
                 <input
@@ -129,9 +129,13 @@ function SignUpContent() {
                   value={form[field as keyof typeof form]}
                   onChange={(e) => set(field, e.target.value)}
                   required
+                  minLength={minLength}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-purple-500"
                   placeholder={placeholder}
                 />
+                {field === "password" && form.password.length > 0 && form.password.length < 8 && (
+                  <p className="text-xs text-amber-400 mt-1">At least 8 characters required</p>
+                )}
               </div>
             ))}
 
