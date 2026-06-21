@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import ConcertCard, { Concert } from "@/components/ConcertCard";
 import Link from "next/link";
 
@@ -11,13 +12,36 @@ interface Owner {
   shareToken: string;
 }
 
-export default function PublicSharePage() {
+function PublicShareContent() {
   const { shareToken } = useParams<{ shareToken: string }>();
+  const searchParams = useSearchParams();
+  const { data: session } = useSession();
   const [owner, setOwner] = useState<Owner | null>(null);
   const [concerts, setConcerts] = useState<Concert[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [followMsg, setFollowMsg] = useState("");
+  const [showFollowBanner, setShowFollowBanner] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
+
+  // Show the follow banner only when coming from sign-in/sign-up via a share link and logged in
+  useEffect(() => {
+    if (searchParams.get("pending") === "follow" && session?.user?.id) {
+      setShowFollowBanner(true);
+    }
+  }, [searchParams, session?.user?.id]);
+
+  async function handleFollow() {
+    setFollowLoading(true);
+    await fetch("/api/follows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shareToken }),
+    });
+    setFollowLoading(false);
+    setShowFollowBanner(false);
+    setFollowMsg("Following!");
+  }
 
   useEffect(() => {
     fetch(`/api/concerts/public?token=${shareToken}`)
@@ -74,6 +98,32 @@ export default function PublicSharePage() {
           </Link>
         </div>
       </header>
+
+      {showFollowBanner && owner && (
+        <div className="border-b border-purple-500/30 bg-purple-900/30">
+          <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-white text-sm font-medium">Follow <span className="text-purple-300">{owner.name}</span>?</p>
+              <p className="text-gray-400 text-xs mt-0.5">See their upcoming concerts in your feed</p>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={handleFollow}
+                disabled={followLoading}
+                className="px-4 py-1.5 rounded-lg text-sm bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-semibold transition-colors"
+              >
+                {followLoading ? "Following…" : "Follow"}
+              </button>
+              <button
+                onClick={() => setShowFollowBanner(false)}
+                className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-5xl mx-auto w-full px-4 py-8">
         <div className="mb-8">
@@ -133,5 +183,13 @@ export default function PublicSharePage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function PublicSharePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="text-gray-500 text-sm">Loading…</div></div>}>
+      <PublicShareContent />
+    </Suspense>
   );
 }

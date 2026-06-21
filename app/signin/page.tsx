@@ -30,21 +30,12 @@ function SignInContent() {
 
   async function handleOAuth(provider: string) {
     setOauthLoading(provider);
-    const callbackUrl = from ? `/u/${from}` : "/";
+    const callbackUrl = from ? `/u/${from}?pending=follow` : "/";
     await signIn(provider, { callbackUrl });
   }
 
   async function afterSignIn() {
-    if (from) {
-      await fetch("/api/follows", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shareToken: from }),
-      });
-      router.push(`/u/${from}`);
-    } else {
-      router.push("/");
-    }
+    router.push(from ? `/u/${from}?pending=follow` : "/");
     router.refresh();
   }
 

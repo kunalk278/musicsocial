@@ -55,23 +55,13 @@ function SignUpContent() {
 
     await signIn("credentials", { email: form.email, password: form.password, redirect: false });
 
-    if (from) {
-      // Came from a friend's share page — follow them then go to their page
-      await fetch("/api/follows", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shareToken: from }),
-      });
-      router.push(`/u/${from}`);
-    } else {
-      router.push("/add");
-    }
+    router.push(from ? `/u/${from}?pending=follow` : "/add");
     router.refresh();
   }
 
   async function handleOAuth(provider: string) {
     setOauthLoading(provider);
-    const callbackUrl = from ? `/u/${from}` : "/add";
+    const callbackUrl = from ? `/u/${from}?pending=follow` : "/add";
     await signIn(provider, { callbackUrl });
   }
 

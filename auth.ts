@@ -45,6 +45,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     }),
   ],
   callbacks: {
+    async signIn({ user, account }) {
+      if (account?.type === "oauth" && user?.email) {
+        const existing = await prisma.user.findUnique({ where: { email: user.email } });
+        if (existing?.password) {
+          // Credentials account exists with this email — require password confirmation
+          return `/link-account?email=${encodeURIComponent(user.email)}&provider=${account.provider}`;
+        }
+      }
+      return true;
+    },
     async jwt({ token, user, account }) {
       if (account?.type === "oauth" && user) {
         // Instagram doesn't return email — use provider ID as a stable identifier
