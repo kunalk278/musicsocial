@@ -29,19 +29,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "bandName and date required" }, { status: 400 });
   }
 
+  function safeUrl(value: unknown): string | null {
+    if (!value || typeof value !== "string") return null;
+    try {
+      const u = new URL(value);
+      return u.protocol === "https:" || u.protocol === "http:" ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
   const concert = await prisma.concert.create({
     data: {
       userId: session.user.id,
-      bandName,
+      bandName: String(bandName).slice(0, 200),
       date,
-      venue: venue ?? null,
-      city: city ?? null,
+      venue: venue ? String(venue).slice(0, 200) : null,
+      city: city ? String(city).slice(0, 100) : null,
       startTime: startTime ?? null,
-      ticketUrl: ticketUrl ?? null,
+      ticketUrl: safeUrl(ticketUrl),
       priceMin: priceMin ?? null,
       priceMax: priceMax ?? null,
-      imageUrl: imageUrl ?? null,
-      status: status ?? "INTERESTED",
+      imageUrl: safeUrl(imageUrl),
+      status: ["INTERESTED", "ATTENDING"].includes(status) ? status : "INTERESTED",
       externalId: externalId ?? null,
     },
   });

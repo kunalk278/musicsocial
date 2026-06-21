@@ -377,8 +377,13 @@ export async function POST(req: NextRequest) {
     fetchResidentAdvisor(bandName, cityName),
   ]);
 
-  // Only surface errors for sources that are configured but failing
-  const apiErrors = [tm.error, sg.error, eb.error, ra.error].filter(Boolean);
+  // Log full errors server-side; only surface a generic message to the client
+  const rawErrors = [tm.error, sg.error, eb.error, ra.error].filter(Boolean);
+  if (rawErrors.length) console.error("[lookup] source errors:", rawErrors);
+  const apiErrors = rawErrors.map((e) => {
+    const source = (e as string).split(":")[0]; // e.g. "Ticketmaster"
+    return `${source}: service temporarily unavailable`;
+  });
 
   return NextResponse.json({
     events: mergeAll([tm.events, sg.events, eb.events, ra.events]),
