@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getUser } from "@/lib/mobileAuth";
 
 interface ShowResult {
   externalId: string;
@@ -358,13 +358,13 @@ function mergeAll(sources: ShowResult[][]): ShowResult[] {
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const sessionUser = await getUser(req);
+  if (!sessionUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { bandName, city: bodyCity } = await req.json();
   if (!bandName) return NextResponse.json({ error: "bandName required" }, { status: 400 });
 
-  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
+  const user = await prisma.user.findUnique({ where: { id: sessionUser.id } });
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const rawCity = bodyCity ?? user.city;

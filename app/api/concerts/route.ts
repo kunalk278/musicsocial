@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getUser } from "@/lib/mobileAuth";
 
-export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function GET(req: NextRequest) {
+  const user = await getUser(req);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const concerts = await prisma.concert.findMany({
-    where: { userId: session.user.id },
+    where: { userId: user.id },
     orderBy: { date: "asc" },
   });
 
@@ -17,31 +15,26 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const user = await getUser(req);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
   const { bandName, date, venue, city, startTime, ticketUrl, priceMin, priceMax, imageUrl, status, externalId } = body;
 
-  if (!bandName || !date) {
+  if (!bandName || !date)
     return NextResponse.json({ error: "bandName and date required" }, { status: 400 });
-  }
 
   function safeUrl(value: unknown): string | null {
     if (!value || typeof value !== "string") return null;
     try {
       const u = new URL(value);
       return u.protocol === "https:" || u.protocol === "http:" ? value : null;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }
 
   const concert = await prisma.concert.create({
     data: {
-      userId: session.user.id,
+      userId: user.id,
       bandName: String(bandName).slice(0, 200),
       date,
       venue: venue ? String(venue).slice(0, 200) : null,
@@ -60,19 +53,12 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const user = await getUser(req);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await req.json();
-  const concert = await prisma.concert.findFirst({
-    where: { id, userId: session.user.id },
-  });
-
-  if (!concert) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
+  const concert = await prisma.concert.findFirst({ where: { id, userId: user.id } });
+  if (!concert) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   await prisma.concert.delete({ where: { id } });
   return NextResponse.json({ success: true });
