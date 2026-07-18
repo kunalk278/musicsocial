@@ -1,7 +1,7 @@
 import { Slot, useRouter, useSegments } from "expo-router";
 import { useEffect } from "react";
+import { View } from "react-native";
 import { AuthProvider, useAuth } from "../lib/auth";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StatusBar } from "expo-status-bar";
 
 function Guard() {
@@ -24,11 +24,11 @@ function Guard() {
 
 export default function RootLayout() {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <View style={{ flex: 1 }}>
       <AuthProvider>
         <StatusBar style="light" />
         <Guard />
       </AuthProvider>
-    </GestureHandlerRootView>
+    </View>
   );
 }
